@@ -1,5 +1,9 @@
 node_modules/
+.npm-cache/
+.dev-webview-profile/
 dist/
+src-tauri/target/
+src-tauri/gen/
 *.local
 .DS_Store
 tune-nest-v*.zip

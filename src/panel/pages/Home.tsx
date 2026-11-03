@@ -5,11 +5,14 @@ interface FeatureItem {
   action: () => void
 }
 
+import type { MusicPlatform } from '@/adapters'
+
 interface Props {
+  platform: MusicPlatform
   onNavigate: (target: string) => void
 }
 
-export function Home({ onNavigate }: Props) {
+export function Home({ platform, onNavigate }: Props) {
   const features: FeatureItem[] = [
     {
       icon: '🎯',
@@ -17,12 +20,12 @@ export function Home({ onNavigate }: Props) {
       desc: '按情绪、语种、风格等维度自动整理歌单',
       action: () => onNavigate('select'),
     },
-    {
+    ...(platform === 'netease' ? [{
       icon: '🏆',
       title: '听歌排行 Top100',
       desc: '查看你播放最多的歌曲排行榜',
       action: () => onNavigate('top-record'),
-    },
+    }] : []),
   ]
 
   return (

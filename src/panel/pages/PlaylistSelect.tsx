@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
 import type { Playlist, Song } from '@/types'
-import { getUserPlaylistsDirect, getPlaylistDetailDirect } from '@/api/netease-direct'
+import { getMusicAdapter, type MusicPlatform } from '@/adapters'
 
 interface Props {
+  platform: MusicPlatform
   uid: number
   onConfirm: (playlists: Playlist[], songs: Song[]) => void
 }
 
-export function PlaylistSelect({ uid, onConfirm }: Props) {
+export function PlaylistSelect({ platform, uid, onConfirm }: Props) {
+  const adapter = getMusicAdapter(platform)
   const [playlists, setPlaylists] = useState<Playlist[]>([])
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [loading, setLoading] = useState(true)
@@ -16,15 +18,17 @@ export function PlaylistSelect({ uid, onConfirm }: Props) {
 
   useEffect(() => {
     loadPlaylists()
-  }, [uid])
+  }, [uid, platform])
 
   const loadPlaylists = async () => {
     setLoading(true)
+    setError(null)
     try {
-      const list = await getUserPlaylistsDirect(uid)
-      setPlaylists(list.filter((p) => p.creator.userId === uid))
+      const list = await adapter.getUserPlaylists(uid)
+      setPlaylists(platform === 'qq' ? list : list.filter((p) => p.creator.userId === uid))
+      setSelected(new Set())
     } catch (err) {
-      setError('获取歌单失败')
+      setError(err instanceof Error ? err.message : '获取歌单失败')
     } finally {
       setLoading(false)
     }
@@ -41,18 +45,19 @@ export function PlaylistSelect({ uid, onConfirm }: Props) {
 
   const handleConfirm = async () => {
     setFetching(true)
+    setError(null)
     const selectedPlaylists = playlists.filter((p) => selected.has(p.id))
     const allSongs: Song[] = []
 
     try {
       for (const pl of selectedPlaylists) {
-        const songs = await getPlaylistDetailDirect(pl.id)
+        const songs = await adapter.getPlaylistSongs(pl.id)
         allSongs.push(...songs)
       }
       const unique = Array.from(new Map(allSongs.map((s) => [s.id, s])).values())
       onConfirm(selectedPlaylists, unique)
     } catch (err) {
-      setError('获取歌曲详情失败')
+      setError(err instanceof Error ? err.message : '获取歌曲详情失败')
     } finally {
       setFetching(false)
     }
@@ -74,6 +79,8 @@ export function PlaylistSelect({ uid, onConfirm }: Props) {
       </p>
 
       {error && <p className="text-red-500 text-sm mb-3">{error}</p>}
+      {error && <button className="tn-btn tn-btn-secondary mb-3" onClick={loadPlaylists}>重新加载歌单</button>}
+      {!error && playlists.length === 0 && <p className="text-sm text-gray-400 py-8">当前账号还没有可整理的歌单。</p>}
 
       <div className="space-y-1 max-h-[400px] overflow-y-auto">
         {playlists.map((pl) => (
@@ -86,7 +93,7 @@ export function PlaylistSelect({ uid, onConfirm }: Props) {
             />
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium text-gray-800 truncate">{pl.name}</p>
-              <p className="text-xs text-gray-400">{pl.trackCount} 首</p>
+              <p className="text-xs text-gray-400">{pl.trackCount} 首{pl.subscribed ? ' · 收藏' : ''}</p>
             </div>
           </label>
         ))}

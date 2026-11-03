@@ -1,50 +1,43 @@
 import { useEffect, useState } from 'react'
 import type { Settings } from '@/types'
 import { DEFAULT_SETTINGS } from '@/types'
+import { getDesktop } from '@/platform/desktop'
+import { loadSettings, saveSettings, requestDeepseek } from '@/platform/settings'
 
-export function OptionsApp() {
+export function OptionsApp({ embedded = false }: { embedded?: boolean }) {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS)
   const [saved, setSaved] = useState(false)
   const [testing, setTesting] = useState(false)
   const [testResult, setTestResult] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
 
   useEffect(() => {
-    chrome.storage.sync.get('settings', (result) => {
-      if (result.settings) {
-        setSettings({ ...DEFAULT_SETTINGS, ...result.settings })
-      }
-    })
+    loadSettings().then(setSettings).catch((err) => setError(err.message)).finally(() => setLoading(false))
   }, [])
 
-  const save = () => {
-    chrome.storage.sync.set({ settings }, () => {
+  const save = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      await saveSettings(settings)
       setSaved(true)
       setTimeout(() => setSaved(false), 2000)
-    })
+    } catch (err) { setError(err instanceof Error ? err.message : '保存失败') }
+    finally { setSaving(false) }
   }
 
   const testConnection = async () => {
     setTesting(true)
     setTestResult(null)
     try {
-      const res = await fetch('https://api.deepseek.com/chat/completions', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${settings.deepseekApiKey}`,
-        },
-        body: JSON.stringify({
+      await requestDeepseek({
           model: 'deepseek-chat',
           messages: [{ role: 'user', content: 'Hi' }],
           max_tokens: 5,
-        }),
-      })
-      if (res.ok) {
-        setTestResult('✓ 连接成功')
-      } else {
-        const err = await res.text()
-        setTestResult(`✗ 失败: ${res.status} ${err.slice(0, 100)}`)
-      }
+      }, settings.deepseekApiKey)
+      setTestResult('✓ 连接成功')
     } catch (err) {
       setTestResult(`✗ 网络错误: ${err instanceof Error ? err.message : '未知'}`)
     } finally {
@@ -53,10 +46,12 @@ export function OptionsApp() {
   }
 
   return (
-    <div className="max-w-lg mx-auto py-10 px-6">
-      <h1 className="text-2xl font-bold text-gray-800 mb-6">TuneNest 设置</h1>
+    <div className={embedded ? 'max-w-xl' : 'max-w-lg mx-auto py-10 px-6'}>
+      {!embedded && <h1 className="text-2xl font-bold text-gray-800 mb-6">TuneNest 设置</h1>}
+      {error && <p role="alert" className="mb-4 text-sm text-red-500">{error}</p>}
+      {loading && <p className="text-sm text-gray-500 mb-4">读取设置中...</p>}
 
-      <div className="space-y-6">
+      <fieldset disabled={loading || saving} className="space-y-6">
         {/* DeepSeek API Key */}
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -101,8 +96,8 @@ export function OptionsApp() {
               <li>回到此页面粘贴到上方输入框，点击保存</li>
             </ol>
             <p className="mt-2 text-gray-400">
-              新注册用户有免费额度，日常分类消耗极少（约几分钱/千首歌）。
-              不配置 API Key 也可以使用，仅用规则分类（准确度稍低）。
+              AI 分类的费用和额度以 DeepSeek 平台显示为准。
+              不配置 API Key 也可以使用规则分类。
             </p>
           </details>
         </div>
@@ -153,11 +148,12 @@ export function OptionsApp() {
         </div>
 
         {/* 保存 */}
+        {getDesktop() && <p className="text-xs text-gray-400">API Key 使用系统加密后保存在本机。</p>}
         <button className="tn-btn tn-btn-primary" onClick={save}>
-          保存设置
+          {saving ? '保存中...' : '保存设置'}
         </button>
         {saved && <span className="text-sm text-green-600 ml-3">已保存</span>}
-      </div>
+      </fieldset>
     </div>
   )
 }

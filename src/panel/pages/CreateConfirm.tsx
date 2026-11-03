@@ -1,17 +1,14 @@
 import { useState, useEffect } from 'react'
-import type { CategoryGroup } from '@/types'
-import {
-  createPlaylistDirect,
-  addSongsToPlaylistDirect,
-  findPlaylistByName,
-  getPlaylistTrackIds,
-  clearPlaylistTracks,
-} from '@/api/netease-direct'
+import type { CategoryGroup, Song } from '@/types'
+import { getMusicAdapter, type MusicPlatform } from '@/adapters'
 
 interface Props {
+  platform: MusicPlatform
   uid: number
+  songs: Song[]
   grouped: CategoryGroup[]
   onDone: () => void
+  onBusyChange?: (busy: boolean) => void
 }
 
 const DIMENSION_LABELS: Record<string, string> = {
@@ -32,10 +29,13 @@ interface PlaylistTask {
   error?: string
   existingId?: number
   existingCount?: number
+  createdId?: number
   conflictAction?: ConflictAction
 }
 
-export function CreateConfirm({ uid, grouped, onDone }: Props) {
+export function CreateConfirm({ platform, uid, songs, grouped, onDone, onBusyChange }: Props) {
+  const adapter = getMusicAdapter(platform)
+  const songsById = new Map(songs.map((song) => [song.id, song]))
   const [tasks, setTasks] = useState<PlaylistTask[]>(() =>
     grouped
       .filter((g) => g.category !== '未分类' && g.songs.length > 0)
@@ -47,8 +47,14 @@ export function CreateConfirm({ uid, grouped, onDone }: Props) {
   )
   const [running, setRunning] = useState(false)
   const [checking, setChecking] = useState(true)
+  const [lookupError, setLookupError] = useState<string | null>(null)
   const [conflictIdx, setConflictIdx] = useState<number | null>(null)
   const [editingIdx, setEditingIdx] = useState<number | null>(null)
+
+  useEffect(() => {
+    onBusyChange?.(running)
+    return () => onBusyChange?.(false)
+  }, [running, onBusyChange])
 
   const renameTask = (idx: number, newName: string) => {
     const updated = [...tasks]
@@ -59,25 +65,28 @@ export function CreateConfirm({ uid, grouped, onDone }: Props) {
     if (updated[idx].status === 'skipped') updated[idx].status = 'pending'
     setTasks(updated)
     setEditingIdx(null)
+    void checkExisting(updated)
   }
 
   useEffect(() => {
     checkExisting()
   }, [])
 
-  const checkExisting = async () => {
+  const checkExisting = async (source: PlaylistTask[] = tasks) => {
     setChecking(true)
-    const updated = [...tasks]
-    for (let i = 0; i < updated.length; i++) {
-      try {
-        const existing = await findPlaylistByName(uid, updated[i].name)
-        if (existing) {
-          updated[i].existingId = existing.id
-          updated[i].existingCount = existing.trackCount
-        }
-      } catch {
-        // ignore
+    setLookupError(null)
+    const updated = [...source]
+    try {
+      const playlists = (await adapter.getUserPlaylists(uid)).filter((playlist) =>
+        platform === 'qq' ? !playlist.subscribed : playlist.creator.userId === uid)
+      for (const task of updated) {
+        const matches = playlists.filter((playlist) => playlist.name === task.name)
+        if (matches.length > 1) throw new Error(`存在多个同名歌单“${task.name}”，请先改名以免写错`)
+        task.existingId = matches[0]?.id
+        task.existingCount = matches[0]?.trackCount
       }
+    } catch (err) {
+      setLookupError(err instanceof Error ? err.message : '检查同名歌单失败')
     }
     setTasks(updated)
     setChecking(false)
@@ -104,6 +113,7 @@ export function CreateConfirm({ uid, grouped, onDone }: Props) {
   }
 
   const runCreate = async () => {
+    if (lookupError) return
     setRunning(true)
     const updated = [...tasks]
 
@@ -111,42 +121,40 @@ export function CreateConfirm({ uid, grouped, onDone }: Props) {
       if (updated[i].status === 'skipped' || updated[i].status === 'done') continue
 
       updated[i].status = 'creating'
+      updated[i].error = undefined
       setTasks([...updated])
 
       try {
         let pid: number
 
-        if (updated[i].existingId && updated[i].conflictAction === 'replace') {
+        const tracks = updated[i].trackIds.map((id) => songsById.get(id))
+        if (tracks.some((song) => !song)) throw new Error('分类结果中有歌曲信息丢失，已停止写入')
+        const targetSongs = tracks as Song[]
+        let alreadyAdded = false
+
+        if (updated[i].createdId) {
+          pid = updated[i].createdId!
+        } else if (updated[i].existingId && updated[i].conflictAction === 'replace') {
           pid = updated[i].existingId!
-          const oldIds = await getPlaylistTrackIds(pid)
-          await clearPlaylistTracks(pid, oldIds)
-          await new Promise((r) => setTimeout(r, 500))
+          if (!adapter.replacePlaylist) throw new Error(`${adapter.name}暂不支持安全替换，请选择追加或跳过`)
+          await adapter.replacePlaylist(pid, targetSongs)
+          alreadyAdded = true
         } else if (updated[i].existingId && updated[i].conflictAction === 'append') {
           pid = updated[i].existingId!
         } else {
-          let created: number | null = null
-          for (let retry = 0; retry < 3; retry++) {
-            try {
-              created = await createPlaylistDirect(updated[i].name)
-              break
-            } catch (e) {
-              if (retry < 2) {
-                await new Promise((r) => setTimeout(r, 2000 * (retry + 1)))
-              } else {
-                throw e
-              }
-            }
+          const justFound = await adapter.findPlaylistByName(uid, updated[i].name)
+          if (justFound) {
+            updated[i].existingId = justFound.id
+            updated[i].existingCount = justFound.trackCount
+            updated[i].conflictAction = null
+            throw new Error('同名歌单已出现，请先选择追加或跳过，避免重复创建')
           }
-          pid = created!
+          // 创建不是幂等操作，403 或网络结果不明时不要自动连续重试。
+          pid = await adapter.createPlaylist(updated[i].name)
+          updated[i].createdId = pid
         }
 
-        const ids = updated[i].trackIds
-        for (let j = 0; j < ids.length; j += 100) {
-          await addSongsToPlaylistDirect(pid, ids.slice(j, j + 100))
-          if (j + 100 < ids.length) {
-            await new Promise((r) => setTimeout(r, 1000))
-          }
-        }
+        if (!alreadyAdded) await adapter.addSongsToPlaylist(pid, targetSongs)
 
         updated[i].status = 'done'
       } catch (err) {
@@ -178,6 +186,7 @@ export function CreateConfirm({ uid, grouped, onDone }: Props) {
 
   return (
     <div>
+      {lookupError && <div className="mb-3 text-sm text-red-500">检查同名歌单失败：{lookupError} <button className="underline" onClick={() => { void checkExisting() }}>重试</button></div>}
       <p className="text-sm text-gray-500 mb-2">
         将创建 {activeTasks.length} 个歌单：
       </p>
@@ -191,9 +200,9 @@ export function CreateConfirm({ uid, grouped, onDone }: Props) {
             <button className="tn-btn text-xs bg-blue-500 text-white hover:bg-blue-600" onClick={() => setAllConflicts('append')}>
               全部追加
             </button>
-            <button className="tn-btn text-xs bg-orange-500 text-white hover:bg-orange-600" onClick={() => setAllConflicts('replace')}>
+            {adapter.replacePlaylist && <button className="tn-btn text-xs bg-orange-500 text-white hover:bg-orange-600" onClick={() => setAllConflicts('replace')}>
               全部替换
-            </button>
+            </button>}
             <button className="tn-btn text-xs bg-gray-400 text-white hover:bg-gray-500" onClick={() => setAllConflicts('skip')}>
               全部跳过
             </button>
@@ -272,8 +281,8 @@ export function CreateConfirm({ uid, grouped, onDone }: Props) {
                 <div className="flex gap-1 mt-1">
                   <button className="text-xs text-blue-500 hover:underline" onClick={() => handleConflictChoice(idx, 'append')}>追加</button>
                   <span className="text-xs text-gray-300">|</span>
-                  <button className="text-xs text-orange-500 hover:underline" onClick={() => handleConflictChoice(idx, 'replace')}>替换</button>
-                  <span className="text-xs text-gray-300">|</span>
+                  {adapter.replacePlaylist && <><button className="text-xs text-orange-500 hover:underline" onClick={() => handleConflictChoice(idx, 'replace')}>替换</button>
+                  <span className="text-xs text-gray-300">|</span></>}
                   <button className="text-xs text-gray-400 hover:underline" onClick={() => handleConflictChoice(idx, 'skip')}>跳过</button>
                 </div>
               )}
@@ -296,9 +305,9 @@ export function CreateConfirm({ uid, grouped, onDone }: Props) {
               <button className="tn-btn tn-btn-primary w-full" onClick={() => handleConflictChoice(conflictIdx, 'append')}>
                 追加歌曲
               </button>
-              <button className="tn-btn w-full bg-orange-500 text-white hover:bg-orange-600" onClick={() => handleConflictChoice(conflictIdx, 'replace')}>
+              {adapter.replacePlaylist && <button className="tn-btn w-full bg-orange-500 text-white hover:bg-orange-600" onClick={() => handleConflictChoice(conflictIdx, 'replace')}>
                 清空后替换
-              </button>
+              </button>}
               <button className="tn-btn tn-btn-secondary w-full" onClick={() => handleConflictChoice(conflictIdx, 'skip')}>
                 跳过
               </button>
@@ -312,9 +321,9 @@ export function CreateConfirm({ uid, grouped, onDone }: Props) {
           <button
             className="tn-btn tn-btn-primary w-full disabled:opacity-50"
             onClick={runCreate}
-            disabled={hasConflicts}
+            disabled={hasConflicts || !!lookupError}
           >
-            {hasConflicts ? '请先处理同名歌单' : `开始创建 (${activeTasks.length} 个歌单)`}
+            {hasConflicts ? '请先处理同名歌单' : `${tasks.some((t) => t.status === 'error') ? '重试未完成' : '开始创建'} (${activeTasks.length - doneCount} 个歌单)`}
           </button>
         )}
         {running && (

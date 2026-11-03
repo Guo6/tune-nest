@@ -1,0 +1,38 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "Microsoft YaHei", sans-serif; color: #202124; background: #f7f8fa; font-synthesis: none; text-rendering: optimizeLegibility; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 760px; min-height: 100vh; overflow: hidden; }
+button, input { font: inherit; }
+.desktop-shell { display: flex; width: 100%; height: 100vh; min-height: 560px; overflow: hidden; }
+.desktop-sidebar { display: flex; flex-direction: column; width: 236px; flex: 0 0 236px; height: 100%; min-height: 0; padding: 28px 16px 18px; color: #aab0bc; background: #171923; }
+.desktop-brand { display: flex; align-items: center; gap: 10px; padding: 0 10px 32px; color: white; font-size: 18px; font-weight: 700; letter-spacing: -.3px; }
+.desktop-brand-icon { display: grid; place-items: center; width: 34px; height: 34px; color: white; font-size: 20px; border-radius: 11px; background: linear-gradient(140deg,#f45c67,#db3546); box-shadow: 0 5px 16px #e7445433; }
+.desktop-brand small { margin-left: auto; color: #737987; font-size: 10px; font-weight: 500; }
+.desktop-nav { display: grid; gap: 7px; }
+.desktop-nav-item { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 13px; color: #aab0bc; text-align: left; font-size: 13px; border: 0; border-radius: 9px; background: transparent; cursor: pointer; transition: .15s ease; }
+.desktop-nav-item > span { width: 18px; color: #888f9e; text-align: center; font-size: 17px; }
+.desktop-nav-item:hover:not(:disabled) { color: white; background: #ffffff0c; }
+.desktop-nav-item.active { color: white; background: #df4050; box-shadow: 0 5px 14px #df405044; }
+.desktop-nav-item.active > span { color: white; }
+.desktop-nav-item:disabled { opacity: .5; cursor: wait; }
+.desktop-sidebar-bottom { margin-top: auto; }
+.desktop-sidebar-bottom p { margin: 15px 10px 0; color: #656b78; font-size: 11px; }
+.desktop-main { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }
+.desktop-topbar { display: flex; flex: 0 0 100px; height: 100px; align-items: center; justify-content: space-between; padding: 0 42px; border-bottom: 1px solid #eaebef; background: #fff; }
+.desktop-eyebrow { margin-bottom: 5px; color: #a2a7b1; font-size: 9px; font-weight: 700; letter-spacing: 1.7px; }
+.desktop-topbar h1 { margin: 0; color: #242630; font-size: 21px; font-weight: 650; letter-spacing: -.4px; }
+.desktop-account { display: flex; align-items: center; gap: 8px; color: #6a707c; font-size: 12px; }
+.desktop-topbar-right { display: flex; align-items: center; gap: 20px; }
+.desktop-version-badge { padding: 5px 9px; color: #6e7480; font-size: 11px; font-weight: 600; border: 1px solid #e5e7eb; border-radius: 999px; background: #f8f9fb; }
+.desktop-online-dot,.desktop-offline-dot { width: 7px; height: 7px; border-radius: 50%; background: #39bf80; box-shadow: 0 0 0 3px #39bf801c; }
+.desktop-offline-dot { background: #eea63c; box-shadow: 0 0 0 3px #eea63c1c; }
+.desktop-content { width: 100%; max-width: 980px; flex: 1; min-height: 0; margin: 0 auto; padding: 38px 42px 48px; overflow-y: auto; }
+.desktop-content > .max-w-xl { max-width: 680px; }
+.desktop-content .tn-btn { padding: 9px 16px; font-size: 13px; }
+.desktop-update { margin-bottom: 20px; padding: 12px 15px; color: #94640c; font-size: 12px; border: 1px solid #f2dfa9; border-radius: 10px; background: #fff9e9; }
+.desktop-update a { color: #cb8c14; font-weight: 600; }
+.desktop-content .tn-panel-body { overflow: visible; }
+@media (max-width: 820px) { .desktop-sidebar { width: 190px; flex-basis: 190px; } .desktop-topbar { padding: 0 24px; } .desktop-content { padding: 28px 24px; } }

@@ -1,40 +1,39 @@
 import type { MusicPlatformAdapter } from './types'
-import type { Playlist, Song } from '@/types'
 import {
-  getLoginStatus,
-  getUserPlaylists,
-  getPlaylistDetail,
-  createPlaylist,
-  addSongsToPlaylist,
-  delay,
-} from '@/api/netease'
+  getLoginStatusDirect, startNeteaseQrLogin, checkNeteaseQrLogin,
+  getUserPlaylistsDirect, getPlaylistDetailDirect, findPlaylistByName,
+  createPlaylistDirect, addSongsToPlaylistDirect,
+  getPlaylistTrackIds, clearPlaylistTracks,
+} from '@/api/netease-direct'
 
-export class NeteaseAdapter implements MusicPlatformAdapter {
-  readonly platform = 'netease'
-
-  async getLoginStatus() {
-    return getLoginStatus()
-  }
-
-  async getUserPlaylists(uid: number): Promise<Playlist[]> {
-    return getUserPlaylists(uid)
-  }
-
-  async getPlaylistSongs(playlistId: number): Promise<Song[]> {
-    return getPlaylistDetail(playlistId)
-  }
-
-  async createPlaylist(name: string): Promise<number> {
-    return createPlaylist(name)
-  }
-
-  async addSongsToPlaylist(playlistId: number, songIds: number[]): Promise<void> {
-    const BATCH = 100
-    for (let i = 0; i < songIds.length; i += BATCH) {
-      await addSongsToPlaylist(playlistId, songIds.slice(i, i + BATCH))
-      if (i + BATCH < songIds.length) {
-        await delay(800)
-      }
+export const neteaseAdapter: MusicPlatformAdapter = {
+  platform: 'netease',
+  name: '网易云音乐',
+  getLoginStatus: getLoginStatusDirect,
+  startQrLogin: startNeteaseQrLogin,
+  async pollQrLogin(key?: string) {
+    if (!key) throw new Error('网易云二维码密钥丢失')
+    const result = await checkNeteaseQrLogin(key)
+    return result.code === 803 ? 'success' : result.code === 802 ? 'scanned'
+      : result.code === 800 ? 'expired' : 'waiting'
+  },
+  getUserPlaylists: getUserPlaylistsDirect,
+  getPlaylistSongs: getPlaylistDetailDirect,
+  async findPlaylistByName(userId, name) {
+    const found = await findPlaylistByName(userId, name)
+    return found ? { id: found.id, name, trackCount: found.trackCount,
+      coverImgUrl: '', creator: { userId, nickname: '' } } : null
+  },
+  createPlaylist: createPlaylistDirect,
+  async addSongsToPlaylist(playlistId, songs) {
+    for (let i = 0; i < songs.length; i += 100) {
+      await addSongsToPlaylistDirect(playlistId, songs.slice(i, i + 100).map((s) => s.id))
     }
-  }
+  },
+  async replacePlaylist(playlistId, songs) {
+    const oldIds = await getPlaylistTrackIds(playlistId)
+    await clearPlaylistTracks(playlistId, oldIds)
+    await new Promise((resolve) => setTimeout(resolve, 500))
+    await this.addSongsToPlaylist(playlistId, songs)
+  },
 }

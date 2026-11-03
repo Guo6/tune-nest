@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react'
 import type { Song, DimensionSelection, ClassifyResult, CategoryGroup, ExtensionResponse } from '@/types'
+import { getDesktop } from '@/platform/desktop'
+import { loadSettings } from '@/platform/settings'
+import { classifySongs, groupByDimension, type ClassifyProgress as Progress } from '@/classifier'
 
 interface Props {
   songs: Song[]
@@ -14,6 +17,20 @@ export function ClassifyProgress({ songs, dimensionSelection, onComplete }: Prop
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    if (getDesktop()) {
+      let active = true
+      const onProgress = (value: Progress) => {
+        if (!active) return
+        setPhase(value.phase); setProgress(value.current); setTotal(value.total)
+      }
+      void loadSettings().then((settings) => classifySongs(songs, settings, dimensionSelection, onProgress))
+        .then((results) => {
+          if (!active) return
+          const grouped = (Object.keys(dimensionSelection) as Array<keyof DimensionSelection>).flatMap((dim) => groupByDimension(results, dim))
+          onComplete(results, grouped)
+        }).catch((err) => { if (active) setError(err instanceof Error ? err.message : '分类失败') })
+      return () => { active = false }
+    }
     const handler = (msg: any) => {
       if (msg?.action === 'CLASSIFY_PROGRESS' && msg.data) {
         setPhase(msg.data.phase)
@@ -59,9 +76,9 @@ export function ClassifyProgress({ songs, dimensionSelection, onComplete }: Prop
 
   return (
     <div className="flex flex-col items-center py-12">
-      <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mb-6" />
+      {!error && <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mb-6" />}
 
-      <p className="text-base font-medium text-gray-800 mb-2">{phaseLabel[phase]}</p>
+      <p className="text-base font-medium text-gray-800 mb-2">{error ? '分类未完成' : phaseLabel[phase]}</p>
       <p className="text-sm text-gray-500 mb-6">
         共 {songs.length} 首歌曲
       </p>

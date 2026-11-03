@@ -1,46 +1,17 @@
 import type { Playlist, Song, Artist, Album } from '@/types'
-
-const BASE_URL = 'https://music.163.com'
+import { NETEASE_BASE_URL, getCreatedPlaylistId, requestNetease } from './netease-request'
 
 async function neteaseRequest<T>(
   path: string,
   params: Record<string, string | number> = {},
   method: 'GET' | 'POST' = 'POST'
 ): Promise<T> {
-  const csrf = await getCsrfToken()
-  const url = new URL(`${BASE_URL}${path}`)
-
-  if (csrf) {
-    params['csrf_token'] = csrf
-  }
-
-  const options: RequestInit = {
-    method,
-    credentials: 'include',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Referer': BASE_URL,
-    },
-  }
-
-  if (method === 'POST') {
-    options.body = new URLSearchParams(
-      Object.entries(params).map(([k, v]) => [k, String(v)])
-    ).toString()
-  } else {
-    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)))
-  }
-
-  const res = await fetch(url.toString(), options)
-  if (!res.ok) {
-    throw new Error(`Request failed: ${res.status} ${res.statusText}`)
-  }
-  return res.json()
+  return requestNetease<T>(path, params, await getCsrfToken(), method)
 }
 
 async function getCsrfToken(): Promise<string> {
   const cookie = await chrome.cookies.get({
-    url: BASE_URL,
+    url: NETEASE_BASE_URL,
     name: '__csrf',
   })
   return cookie?.value || ''
@@ -174,7 +145,7 @@ export async function createPlaylist(name: string): Promise<number> {
     '/api/playlist/create',
     { name, privacy: 0, type: 'NORMAL' }
   )
-  return res.id || res.playlist?.id
+  return getCreatedPlaylistId(res)
 }
 
 // ===== 添加歌曲到歌单 =====

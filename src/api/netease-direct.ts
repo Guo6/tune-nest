@@ -1,6 +1,7 @@
 import type { Playlist, Song, Artist, Album } from '@/types'
-
-const BASE_URL = 'https://music.163.com'
+import { getCreatedPlaylistId, requestNetease } from './netease-request'
+import { getDesktop, unwrapDesktopResult } from '@/platform/desktop'
+import { makeQrDataUrl } from '@/utils/qr'
 
 function getCsrf(): string {
   const match = document.cookie.match(/(?:^|;\s*)__csrf=([^;]+)/)
@@ -10,43 +11,61 @@ function getCsrf(): string {
 async function req<T>(
   path: string,
   params: Record<string, string | number> = {},
-  method: 'GET' | 'POST' = 'POST'
+  method: 'GET' | 'POST' = 'POST',
+  acceptedCodes: number[] = [],
 ): Promise<T> {
-  const csrf = getCsrf()
-  if (csrf) params['csrf_token'] = csrf
-
-  const url = new URL(`${BASE_URL}${path}`)
-  const opts: RequestInit = {
-    method,
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+  const desktop = getDesktop()
+  if (desktop) {
+    const csrf = unwrapDesktopResult(await desktop.getNeteaseCsrf())
+    return requestNetease<T>(path, params, csrf, method, async (url, options) => {
+      const headers = Object.fromEntries(new Headers(options.headers).entries())
+      const response = unwrapDesktopResult(await desktop.fetchNetease(url, options.method || method, String(options.body || ''), headers))
+      return new Response(response.body, { status: response.status })
+    }, acceptedCodes)
   }
+  return requestNetease<T>(path, params, getCsrf(), method, (url, options) => fetch(url, options), acceptedCodes)
+}
 
-  if (method === 'POST') {
-    opts.body = new URLSearchParams(
-      Object.entries(params).map(([k, v]) => [k, String(v)])
-    ).toString()
-  } else {
-    Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, String(v)))
+export interface NeteaseQrStatus { code: number; message?: string; cookie?: string }
+
+export async function startNeteaseQrLogin(): Promise<{ key: string; image: string }> {
+  let keyResponse: { data?: { unikey?: string }; unikey?: string }
+  try {
+    keyResponse = await req<{ data?: { unikey?: string }; unikey?: string }>(
+    '/api/login/qrcode/unikey', { type: 1 }
+    )
+  } catch (error) {
+    throw new Error(`获取二维码密钥失败（weapi/login/qrcode/unikey）：${error instanceof Error ? error.message : String(error)}`)
   }
+  const key = keyResponse.data?.unikey || keyResponse.unikey
+  if (!key) throw new Error('网易云没有返回二维码密钥')
+  // NetEase's QR content is a login URL; there is no upstream "create image"
+  // endpoint. Generate the QR locally so the unikey is never sent to a third party.
+  return { key, image: makeQrDataUrl(`https://music.163.com/login?codekey=${encodeURIComponent(key)}`) }
+}
 
-  const res = await fetch(url.toString(), opts)
-  if (!res.ok) throw new Error(`Request failed: ${res.status} ${res.statusText}`)
-  return res.json()
+export async function checkNeteaseQrLogin(key: string): Promise<NeteaseQrStatus> {
+  const result = await req<NeteaseQrStatus>(
+    '/api/login/qrcode/client/login', { key, type: 1 }, 'POST', [800, 801, 802, 803]
+  ).catch((error: unknown) => {
+    throw new Error(`查询扫码状态失败（weapi/login/qrcode/client/login）：${error instanceof Error ? error.message : String(error)}`)
+  })
+  if (result.code === 803 && result.cookie) {
+    const desktop = getDesktop()
+    if (desktop) unwrapDesktopResult(await desktop.storeNeteaseCookie(result.cookie))
+  }
+  return result
 }
 
 export async function getLoginStatusDirect(): Promise<{ userId: number; nickname: string } | null> {
   try {
-    console.info('[TuneNest] checking login, cookie:', document.cookie.substring(0, 100))
     const res = await req<Record<string, unknown>>('/api/w/nuser/account/get')
-    console.info('[TuneNest] login API response:', JSON.stringify(res).substring(0, 500))
     // 尝试多种响应格式
     const profile = (res as any)?.data?.profile || (res as any)?.profile || null
-    console.info('[TuneNest] parsed profile:', profile)
     return profile
   } catch (err) {
-    console.error('[TuneNest] login check error:', err)
-    return null
+    if (err && typeof err === 'object' && 'code' in err && (err.code === 301 || err.code === 401 || err.code === 404)) return null
+    throw err
   }
 }
 
@@ -113,16 +132,11 @@ export async function getSongDetailsDirect(ids: number[]): Promise<Song[]> {
 }
 
 export async function createPlaylistDirect(name: string): Promise<number> {
-  const res = await req<Record<string, any>>(
+  const res = await req<{ id?: number; playlist?: { id: number } }>(
     '/api/playlist/create',
     { name, privacy: 0, type: 'NORMAL' }
   )
-  console.info('[TuneNest] createPlaylist response:', JSON.stringify(res).substring(0, 300))
-  const pid = res.id || res.playlist?.id
-  if (!pid) {
-    throw new Error(`创建歌单失败: ${res.code || res.message || JSON.stringify(res).substring(0, 100)}`)
-  }
-  return pid
+  return getCreatedPlaylistId(res)
 }
 
 export async function findPlaylistByName(

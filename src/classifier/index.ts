@@ -24,7 +24,7 @@ export async function classifySongs(
   // Step 0: 从缓存加载已分类结果
   const uncachedSongs: Song[] = []
   for (const song of songs) {
-    const cached = await getCache<ClassifyResult>(`classify_${song.id}`)
+    const cached = await getCache<ClassifyResult>(`classify_${song.platform || 'netease'}_${song.id}`)
     if (cached) {
       results.set(song.id, cached)
     } else {
@@ -102,7 +102,7 @@ export async function classifySongs(
   for (const song of uncachedSongs) {
     const r = results.get(song.id)
     if (r) {
-      await setCache(`classify_${song.id}`, r, CACHE_TTL)
+      await setCache(`classify_${song.platform || 'netease'}_${song.id}`, r, CACHE_TTL)
     }
   }
 

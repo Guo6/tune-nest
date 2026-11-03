@@ -1,6 +1,5 @@
 import type { ClassifyResult, DimensionSelection, ClassifyDimension } from '@/types'
-
-const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions'
+import { requestDeepseek } from '@/platform/settings'
 
 interface DeepSeekMessage {
   role: 'system' | 'user' | 'assistant'
@@ -135,26 +134,12 @@ export async function classifyByAI(
   const estimatedTokensPerSong = 30 + dimsToClassify.length * 15
   const maxTokens = Math.min(Math.max(songsWithNeededDims.length * estimatedTokensPerSong, 512), 8192)
 
-  const res = await fetch(DEEPSEEK_API_URL, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
+  const data = await requestDeepseek({
       model: 'deepseek-chat',
       messages,
       temperature: 0,
       max_tokens: maxTokens,
-    }),
-  })
-
-  if (!res.ok) {
-    const errText = await res.text()
-    throw new Error(`DeepSeek API error: ${res.status} ${errText}`)
-  }
-
-  const data = await res.json()
+  }, apiKey) as { choices?: Array<{ message?: { content?: string } }> }
   const content = data.choices?.[0]?.message?.content || ''
 
   const jsonMatch = content.match(/\[[\s\S]*\]/)

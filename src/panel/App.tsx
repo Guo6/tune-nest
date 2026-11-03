@@ -9,8 +9,11 @@ import { TopRecord } from './pages/TopRecord'
 import { Home } from './pages/Home'
 import type { Playlist, Song, DimensionSelection, ClassifyResult, CategoryGroup } from '@/types'
 import { DIMENSION_META } from '@/types'
+import { getDesktop } from '@/platform/desktop'
+import { OptionsApp } from '@/options/OptionsApp'
+import type { MusicPlatform } from '@/adapters'
 
-const CURRENT_VERSION = (() => {
+const CURRENT_VERSION = getDesktop()?.version || (() => {
   try { return chrome.runtime.getManifest().version } catch { return '0.1.0' }
 })()
 const GITHUB_REPO = 'fy-xbot/tune-nest'
@@ -27,11 +30,15 @@ export interface AppState {
 }
 
 export function PanelApp() {
+  const desktop = getDesktop()
   const [open, setOpen] = useState(false)
   const [showLoginHint, setShowLoginHint] = useState(true)
   const [step, setStep] = useState<Step>('login')
+  const [platform, setPlatform] = useState<MusicPlatform>(() => getDesktop() && localStorage.getItem('tn_platform') === 'qq' ? 'qq' : 'netease')
   const [prevStep, setPrevStep] = useState<Step>('login')
   const [latestVersion, setLatestVersion] = useState<string | null>(null)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [busy, setBusy] = useState(false)
   const [state, setState] = useState<AppState>({
     uid: null,
     selectedPlaylists: [],
@@ -41,9 +48,7 @@ export function PanelApp() {
     grouped: [],
   })
 
-  useEffect(() => {
-    checkUpdate()
-  }, [])
+  useEffect(() => { if (!desktop) checkUpdate() }, [])
 
   const checkUpdate = async () => {
     try {
@@ -61,11 +66,23 @@ export function PanelApp() {
     setState((prev) => ({ ...prev, ...partial }))
   }
 
+  const changePlatform = (next: MusicPlatform) => {
+    if (next === platform) return
+    setPlatform(next)
+    localStorage.setItem('tn_platform', next)
+    updateState({ uid: null, selectedPlaylists: [], songs: [], results: [], grouped: [] })
+    setSettingsOpen(false)
+    setStep('login')
+  }
+
   const renderStep = () => {
     switch (step) {
       case 'login':
         return (
           <LoginCheck
+            key={platform}
+            platform={platform}
+            onPlatformChange={changePlatform}
             onSuccess={(uid) => {
               updateState({ uid })
               setStep('home')
@@ -75,6 +92,7 @@ export function PanelApp() {
       case 'home':
         return (
           <Home
+            platform={platform}
             onNavigate={(target) => {
               setPrevStep('home')
               setStep(target as Step)
@@ -84,6 +102,7 @@ export function PanelApp() {
       case 'select':
         return (
           <PlaylistSelect
+            platform={platform}
             uid={state.uid!}
             onConfirm={(playlists, songs) => {
               updateState({ selectedPlaylists: playlists, songs })
@@ -149,12 +168,15 @@ export function PanelApp() {
       case 'create':
         return (
           <CreateConfirm
+            platform={platform}
             uid={state.uid!}
+            songs={state.songs}
             grouped={state.grouped}
             onDone={() => {
               setStep('login')
               setOpen(false)
             }}
+            onBusyChange={setBusy}
           />
         )
       case 'top-record':
@@ -165,6 +187,50 @@ export function PanelApp() {
           />
         )
     }
+  }
+
+  if (desktop) {
+    const navigation: Array<{ key: string; title: string; icon: string; step?: Step }> = [
+      { key: 'home', title: '首页', icon: '⌂', step: 'home' },
+      { key: 'classify', title: '智能歌单分类', icon: '✦', step: 'select' },
+      ...(platform === 'netease' ? [{ key: 'top', title: '听歌排行 Top100', icon: '♜', step: 'top-record' as Step }] : []),
+    ]
+    const classifySteps: Step[] = ['select', 'dimensions', 'progress', 'result', 'create']
+    const isNavigationItemActive = (key: string, itemStep?: Step) => {
+      if (settingsOpen) return false
+      if (key === 'home') return step === 'login' || step === 'home'
+      if (key === 'classify') return classifySteps.includes(step)
+      return itemStep === step
+    }
+    return (
+      <div className="desktop-shell">
+        <aside className="desktop-sidebar">
+          <div className="desktop-brand"><span className="desktop-brand-icon">♫</span><span>TuneNest</span><small>v{CURRENT_VERSION}</small></div>
+          <nav className="desktop-nav">
+            {navigation.map((item) => (
+              <button key={item.key} className={`desktop-nav-item ${isNavigationItemActive(item.key, item.step) ? 'active' : ''}`} disabled={busy} onClick={() => { setSettingsOpen(false); setStep(state.uid ? item.step! : 'login') }}>
+                <span>{item.icon}</span>{item.title}
+              </button>
+            ))}
+          </nav>
+          <div className="desktop-sidebar-bottom">
+            <div className="flex gap-2 px-3 mb-3">
+              <button className={`tn-btn text-xs flex-1 ${platform === 'netease' ? 'tn-btn-primary' : 'tn-btn-secondary'}`} disabled={busy} onClick={() => changePlatform('netease')}>网易云</button>
+              <button className={`tn-btn text-xs flex-1 ${platform === 'qq' ? 'tn-btn-primary' : 'tn-btn-secondary'}`} disabled={busy} onClick={() => changePlatform('qq')}>QQ 音乐</button>
+            </div>
+            <button className={`desktop-nav-item ${settingsOpen ? 'active' : ''}`} disabled={busy} onClick={() => setSettingsOpen(true)}><span>⚙</span>设置</button>
+            <p>{platform === 'qq' ? 'QQ 音乐' : '网易云音乐'}歌单整理工具</p>
+          </div>
+        </aside>
+        <main className="desktop-main">
+          <header className="desktop-topbar"><div><div className="desktop-eyebrow">TUNENEST MUSIC ORGANIZER</div><h1>{settingsOpen ? '设置' : step === 'login' ? `连接${platform === 'qq' ? 'QQ 音乐' : '网易云音乐'}` : step === 'home' ? '欢迎回来' : step === 'select' ? '选择歌单' : step === 'dimensions' ? '选择分类维度' : step === 'progress' ? '整理歌曲' : step === 'result' ? '分类结果' : step === 'create' ? '创建歌单' : '听歌排行'}</h1></div><div className="desktop-topbar-right"><span className="desktop-version-badge">版本 v{CURRENT_VERSION}</span><div className="desktop-account">{state.uid ? <><span className="desktop-online-dot"/>已登录 · {platform === 'qq' ? 'QQ 音乐' : '网易云'}</> : <><span className="desktop-offline-dot"/>未连接</>}</div></div></header>
+          <section className="desktop-content">
+            {latestVersion && <div className="desktop-update">发现新版本 v{latestVersion}　<a href={`https://github.com/${GITHUB_REPO}/releases/latest`} target="_blank" rel="noreferrer">前往更新</a></div>}
+            {settingsOpen ? <OptionsApp embedded /> : renderStep()}
+          </section>
+        </main>
+      </div>
+    )
   }
 
   return (

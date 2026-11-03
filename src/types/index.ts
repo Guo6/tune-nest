@@ -2,6 +2,9 @@
 
 export interface Song {
   id: number
+  platform?: 'netease' | 'qq'
+  mid?: string
+  songType?: number
   name: string
   artists: Artist[]
   album: Album
@@ -24,6 +27,10 @@ export interface Album {
 
 export interface Playlist {
   id: number
+  platform?: 'netease' | 'qq'
+  subscribed?: boolean
+  dirId?: number
+  tid?: number
   name: string
   trackCount: number
   coverImgUrl: string
