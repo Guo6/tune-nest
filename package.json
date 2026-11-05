@@ -1,6 +1,6 @@
 {
   "name": "tune-nest",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "网易云音乐与 QQ 音乐智能歌单分类桌面应用",
   "type": "module",
   "scripts": {

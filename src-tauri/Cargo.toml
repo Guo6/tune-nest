@@ -1,6 +1,6 @@
 [package]
 name = "tunenest"
-version = "0.1.8"
+version = "0.1.9"
 description = "TuneNest desktop app"
 authors = ["TuneNest"]
 edition = "2021"

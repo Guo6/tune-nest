@@ -182,20 +182,58 @@ pub(crate) async fn start_qq_qr_login(
     Ok(json!({ "image": format!("data:image/png;base64,{}", STANDARD.encode(bytes)) }))
 }
 
+fn parse_qr_callback(redirect_url: &str) -> Result<Url, String> {
+    let mut url = Url::parse(redirect_url).map_err(|_| "QQ 扫码回调地址无效")?;
+    // QQ Connect uses graph.qq.com login hosts, while older callbacks use qq.com.
+    // Keep the exact signature endpoint allowlist; never follow arbitrary URLs.
+    let default_port = match url.scheme() {
+        "https" => Some(443),
+        "http" => Some(80),
+        _ => None,
+    };
+    if default_port.is_none()
+        || !matches!(
+            url.host_str(),
+            Some("ptlogin2.qq.com")
+                | Some("ssl.ptlogin2.qq.com")
+                | Some("ptlogin2.graph.qq.com")
+                | Some("ssl.ptlogin2.graph.qq.com")
+        )
+        || url.path() != "/check_sig"
+        || url.port_or_known_default() != default_port
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+    {
+        // Do not expose the query: it contains one-time login credentials.
+        return Err(format!(
+            "QQ 扫码回调地址不受信任（域名：{}；需要指定 QQ 登录服务的 HTTPS /check_sig 地址）",
+            url.host_str().unwrap_or("未知")
+        ));
+    }
+    // Legacy callbacks may advertise HTTP. Upgrade only these validated hosts
+    // to their TLS endpoint before any cookie or login token is sent.
+    if url.scheme() == "http" {
+        let tls_host = match url.host_str() {
+            Some("ptlogin2.qq.com") => "ssl.ptlogin2.qq.com",
+            Some("ptlogin2.graph.qq.com") => "ssl.ptlogin2.graph.qq.com",
+            Some("ssl.ptlogin2.qq.com") => "ssl.ptlogin2.qq.com",
+            Some("ssl.ptlogin2.graph.qq.com") => "ssl.ptlogin2.graph.qq.com",
+            _ => unreachable!("callback host was checked above"),
+        };
+        url.set_host(Some(tls_host))
+            .map_err(|_| "QQ 扫码回调地址无效")?;
+        url.set_scheme("https").map_err(|_| "QQ 扫码回调地址无效")?;
+    }
+    Ok(url)
+}
+
 async fn complete_qr_login(
     session: &QqSession,
     redirect_url: &str,
     qrsig: &str,
 ) -> Result<(), String> {
-    let url = Url::parse(redirect_url).map_err(|_| "QQ 扫码回调地址无效")?;
-    if url.scheme() != "https"
-        || !matches!(
-            url.host_str(),
-            Some("ptlogin2.qq.com") | Some("ssl.ptlogin2.qq.com")
-        )
-    {
-        return Err("QQ 扫码回调地址不受信任".into());
-    }
+    let url = parse_qr_callback(redirect_url)?;
     let http = client()?;
     let mut cookies = HashMap::new();
     cookies.insert("qrsig".into(), qrsig.into());
@@ -204,7 +242,10 @@ async fn complete_qr_login(
         .header(header::COOKIE, cookie_header(&cookies))
         .send()
         .await
-        .map_err(|e| format!("QQ 登录签名校验失败：{e}"))?;
+        .map_err(|e| format!("QQ 登录签名校验失败：{}", e.without_url()))?;
+    if !checked.status().is_success() && !checked.status().is_redirection() {
+        return Err(format!("QQ 登录签名校验失败（HTTP {}）", checked.status()));
+    }
     response_cookies(&checked, &mut cookies);
     let p_skey = cookies
         .get("p_skey")
@@ -432,7 +473,7 @@ pub(crate) async fn fetch_qq(
 
 #[cfg(test)]
 mod tests {
-    use super::{cookie_pairs, hash33, qq_uin};
+    use super::{cookie_pairs, hash33, parse_qr_callback, qq_uin};
     use std::collections::HashMap;
 
     #[test]
@@ -441,5 +482,55 @@ mod tests {
         cookie_pairs("uin=o0012345; qm_keyst=key; Path=/", &mut cookies);
         assert_eq!(qq_uin(&cookies).as_deref(), Some("12345"));
         assert_eq!(hash33("abc", 5381), 193485963);
+    }
+
+    #[test]
+    fn accepts_qq_connect_signature_callbacks_and_preserves_query() {
+        for host in [
+            "ssl.ptlogin2.graph.qq.com",
+            "ptlogin2.graph.qq.com",
+            "ssl.ptlogin2.qq.com",
+            "ptlogin2.qq.com",
+        ] {
+            let input = format!("https://{host}/check_sig?pttype=1&ptsigx=test-only&uin=123");
+            let parsed = parse_qr_callback(&input).unwrap();
+            assert_eq!(parsed.as_str(), input);
+        }
+    }
+
+    #[test]
+    fn rejects_unsafe_callbacks_without_disclosing_login_tokens() {
+        for input in [
+            "ftp://ssl.ptlogin2.graph.qq.com/check_sig",
+            "http://evil.example/check_sig",
+            "https://ssl.ptlogin2.graph.qq.com.evil.example/check_sig",
+            "https://evil.example/check_sig",
+            "https://ssl.ptlogin2.graph.qq.com:444/check_sig",
+            "https://user@ssl.ptlogin2.graph.qq.com/check_sig",
+            "https://ssl.ptlogin2.graph.qq.com/other",
+            "https://ssl.ptlogin2.graph.qq.com/check_sig#fragment",
+        ] {
+            let error =
+                parse_qr_callback(&format!("{input}?ptsigx=secret-test-token")).unwrap_err();
+            assert!(!error.contains("secret-test-token"));
+        }
+        assert!(parse_qr_callback("not a URL").is_err());
+    }
+
+    #[test]
+    fn upgrades_legacy_callbacks_before_sending_login_credentials() {
+        for (host, tls_host) in [
+            ("ptlogin2.graph.qq.com", "ssl.ptlogin2.graph.qq.com"),
+            ("ptlogin2.qq.com", "ssl.ptlogin2.qq.com"),
+            ("ssl.ptlogin2.graph.qq.com", "ssl.ptlogin2.graph.qq.com"),
+        ] {
+            let input = format!("http://{host}/check_sig?ptsigx=test-only");
+            let parsed = parse_qr_callback(&input).unwrap();
+            assert_eq!(
+                parsed.as_str(),
+                format!("https://{tls_host}/check_sig?ptsigx=test-only")
+            );
+        }
+        assert!(parse_qr_callback("http://ptlogin2.graph.qq.com:8080/check_sig").is_err());
     }
 }

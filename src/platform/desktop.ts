@@ -42,7 +42,7 @@ export function getDesktop(): DesktopBridge | undefined {
       }))
 
   desktopBridge = {
-    version: '0.1.8',
+    version: '0.1.9',
     getNeteaseCsrf: () => invokeResult('get_netease_csrf'),
     getNeteaseLoginState: () => invokeResult('get_netease_login_state'),
     fetchNetease: (url, method, body, headers) => invokeResult('fetch_netease', { url, method, body, headers }),
