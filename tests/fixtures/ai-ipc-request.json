@@ -1,0 +1,7 @@
+{
+  "providers": ["xbot", "deepseek", "zhipu"],
+  "body": {
+    "messages": [{ "role": "user", "content": "Reply with OK only." }],
+    "max_tokens": 256
+  }
+}

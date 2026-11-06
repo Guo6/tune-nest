@@ -1,16 +1,17 @@
 import { useEffect, useState } from 'react'
 import type { Song, DimensionSelection, ClassifyResult, CategoryGroup, ExtensionResponse } from '@/types'
 import { getDesktop } from '@/platform/desktop'
-import { loadSettings } from '@/platform/settings'
+import { loadClassificationSettings } from '@/platform/settings'
 import { classifySongs, groupByDimension, type ClassifyProgress as Progress } from '@/classifier'
 
 interface Props {
   songs: Song[]
   dimensionSelection: DimensionSelection
+  rulesOnly?: boolean
   onComplete: (results: ClassifyResult[], grouped: CategoryGroup[]) => void
 }
 
-export function ClassifyProgress({ songs, dimensionSelection, onComplete }: Props) {
+export function ClassifyProgress({ songs, dimensionSelection, rulesOnly = false, onComplete }: Props) {
   const [phase, setPhase] = useState<'rule' | 'ai' | 'done'>('rule')
   const [progress, setProgress] = useState(0)
   const [total, setTotal] = useState(songs.length)
@@ -23,7 +24,7 @@ export function ClassifyProgress({ songs, dimensionSelection, onComplete }: Prop
         if (!active) return
         setPhase(value.phase); setProgress(value.current); setTotal(value.total)
       }
-      void loadSettings().then((settings) => classifySongs(songs, settings, dimensionSelection, onProgress))
+      void loadClassificationSettings(rulesOnly).then((settings) => classifySongs(songs, settings, dimensionSelection, onProgress))
         .then((results) => {
           if (!active) return
           const grouped = (Object.keys(dimensionSelection) as Array<keyof DimensionSelection>).flatMap((dim) => groupByDimension(results, dim))
@@ -47,7 +48,7 @@ export function ClassifyProgress({ songs, dimensionSelection, onComplete }: Prop
     try {
       const res: ExtensionResponse = await chrome.runtime.sendMessage({
         action: 'CLASSIFY_SONGS',
-        data: { songs, dimensionSelection },
+        data: { songs, dimensionSelection, rulesOnly },
       })
 
       if (res.success && res.data) {

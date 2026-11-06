@@ -1,13 +1,12 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import type { Settings } from '@/types'
+import type { AIProvider, Settings } from '@/types'
 
 export type DesktopResult<T> =
   | { ok: true; data: T }
   | { ok: false; error: { message: string; code?: number } }
 
 export interface ChatRequest {
-  model: 'deepseek-chat'
   messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>
   max_tokens: number
   temperature?: number
@@ -25,7 +24,8 @@ export interface DesktopBridge {
   fetchQq(url: string, method: string, body: string): Promise<DesktopResult<{ status: number; body: string }>>
   getSettings(): Promise<DesktopResult<Settings>>
   saveSettings(settings: Settings): Promise<DesktopResult<void>>
-  requestDeepseek(body: ChatRequest, apiKey?: string): Promise<DesktopResult<unknown>>
+  requestAI(provider: AIProvider, body: ChatRequest, apiKey?: string): Promise<DesktopResult<unknown>>
+  openAIConsole(provider: AIProvider): Promise<DesktopResult<void>>
   onLoginChanged(callback: () => void): () => void
 }
 
@@ -42,7 +42,7 @@ export function getDesktop(): DesktopBridge | undefined {
       }))
 
   desktopBridge = {
-    version: '0.1.9',
+    version: '0.1.12',
     getNeteaseCsrf: () => invokeResult('get_netease_csrf'),
     getNeteaseLoginState: () => invokeResult('get_netease_login_state'),
     fetchNetease: (url, method, body, headers) => invokeResult('fetch_netease', { url, method, body, headers }),
@@ -53,7 +53,8 @@ export function getDesktop(): DesktopBridge | undefined {
     fetchQq: (url, method, body) => invokeResult('fetch_qq', { url, method, body }),
     getSettings: () => invokeResult('get_settings'),
     saveSettings: (settings) => invokeResult<void>('save_settings', { settings }),
-    requestDeepseek: (body, apiKey) => invokeResult('request_deepseek', { body, apiKey }),
+    requestAI: (provider, body, apiKey) => invokeResult('request_ai', { provider, body, apiKey }),
+    openAIConsole: (provider) => invokeResult('open_ai_console', { provider }),
     onLoginChanged: (callback) => {
       let disposed = false
       let dispose: (() => void) | undefined

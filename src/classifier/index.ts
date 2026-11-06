@@ -2,6 +2,7 @@ import type { Song, ClassifyResult, ClassifyDimension, DimensionSelection, Categ
 import { classifyByRules } from './rule-classifier'
 import { classifyByAI } from './ai-classifier'
 import { getCache, setCache } from '@/utils/cache'
+import { hasAIKey } from '@/platform/ai'
 
 const ALL_DIMENSIONS: ClassifyDimension[] = ['mood', 'language', 'region', 'era', 'genre']
 const CACHE_TTL = 7 * 24 * 60 * 60 * 1000 // 7 天
@@ -20,11 +21,12 @@ export async function classifySongs(
 ): Promise<ClassifyResult[]> {
   const selectedDimensions = Object.keys(dimensionSelection) as ClassifyDimension[]
   const results = new Map<number, ClassifyResult>()
+  const cacheKey = (song: Song) => `classify_v2_${song.platform || 'netease'}_${song.id}_${settings.enableAI ? settings.aiProvider : 'rules'}_${JSON.stringify(dimensionSelection)}`
 
   // Step 0: 从缓存加载已分类结果
   const uncachedSongs: Song[] = []
   for (const song of songs) {
-    const cached = await getCache<ClassifyResult>(`classify_${song.platform || 'netease'}_${song.id}`)
+    const cached = await getCache<ClassifyResult>(cacheKey(song))
     if (cached) {
       results.set(song.id, cached)
     } else {
@@ -40,7 +42,7 @@ export async function classifySongs(
   }
 
   // Step 2: AI 补充分类（如果启用且有 API Key）
-  if (settings.enableAI && settings.deepseekApiKey) {
+  if (settings.enableAI && hasAIKey(settings)) {
     const needsAI = songs.filter((s) => {
       const r = results.get(s.id)!
       return selectedDimensions.some((d) => !r[d])
@@ -58,7 +60,7 @@ export async function classifySongs(
         }))
 
         try {
-          const aiResults = await classifyByAI(inputs, settings.deepseekApiKey, dimensionSelection, results)
+          const aiResults = await classifyByAI(inputs, settings, dimensionSelection, results)
 
           for (const [songId, aiResult] of aiResults) {
             const existing = results.get(songId)
@@ -72,7 +74,7 @@ export async function classifySongs(
             }
           }
         } catch (err) {
-          console.error('[TuneNest] AI classification batch failed:', err)
+          throw new Error(`AI 分类未完成：${err instanceof Error ? err.message : '调用失败'}。可到设置测试当前渠道，或关闭 AI 使用规则分类。`)
         }
 
         onProgress?.({
@@ -102,7 +104,7 @@ export async function classifySongs(
   for (const song of uncachedSongs) {
     const r = results.get(song.id)
     if (r) {
-      await setCache(`classify_${song.platform || 'netease'}_${song.id}`, r, CACHE_TTL)
+      await setCache(cacheKey(song), r, CACHE_TTL)
     }
   }
 

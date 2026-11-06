@@ -7,6 +7,7 @@ import { ResultPreview } from './pages/ResultPreview'
 import { CreateConfirm } from './pages/CreateConfirm'
 import { TopRecord } from './pages/TopRecord'
 import { Home } from './pages/Home'
+import { AISetupGate } from './pages/AISetupGate'
 import type { Playlist, Song, DimensionSelection, ClassifyResult, CategoryGroup } from '@/types'
 import { DIMENSION_META } from '@/types'
 import { getDesktop } from '@/platform/desktop'
@@ -18,7 +19,7 @@ const CURRENT_VERSION = getDesktop()?.version || (() => {
 })()
 const GITHUB_REPO = 'fy-xbot/tune-nest'
 
-export type Step = 'login' | 'home' | 'select' | 'dimensions' | 'progress' | 'result' | 'create' | 'top-record'
+export type Step = 'login' | 'home' | 'ai-setup' | 'select' | 'dimensions' | 'progress' | 'result' | 'create' | 'top-record'
 
 export interface AppState {
   uid: number | null
@@ -39,6 +40,8 @@ export function PanelApp() {
   const [latestVersion, setLatestVersion] = useState<string | null>(null)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [aiSetupTarget, setAISetupTarget] = useState<'select' | 'progress'>('select')
+  const [rulesOnly, setRulesOnly] = useState(false)
   const [state, setState] = useState<AppState>({
     uid: null,
     selectedPlaylists: [],
@@ -95,10 +98,13 @@ export function PanelApp() {
             platform={platform}
             onNavigate={(target) => {
               setPrevStep('home')
-              setStep(target as Step)
+              if (target === 'select') { setAISetupTarget('select'); setStep('ai-setup') }
+              else setStep(target as Step)
             }}
           />
         )
+      case 'ai-setup':
+        return <AISetupGate key={`${platform}-${aiSetupTarget}`} onContinue={(skipAI) => { setRulesOnly(skipAI); setStep(aiSetupTarget) }} onBack={() => setStep(aiSetupTarget === 'progress' ? 'dimensions' : 'home')} />
       case 'select':
         return (
           <PlaylistSelect
@@ -115,7 +121,10 @@ export function PanelApp() {
           <DimensionConfig
             selection={state.dimensionSelection}
             onChange={(sel) => updateState({ dimensionSelection: sel })}
-            onConfirm={() => setStep('progress')}
+            onConfirm={() => {
+              if (rulesOnly) setStep('progress')
+              else { setAISetupTarget('progress'); setStep('ai-setup') }
+            }}
             onBack={() => setStep('select')}
           />
         )
@@ -124,6 +133,7 @@ export function PanelApp() {
           <ClassifyProgress
             songs={state.songs}
             dimensionSelection={state.dimensionSelection}
+            rulesOnly={rulesOnly}
             onComplete={(results, grouped) => {
               updateState({ results, grouped })
               setStep('result')
@@ -195,7 +205,7 @@ export function PanelApp() {
       { key: 'classify', title: '智能歌单分类', icon: '✦', step: 'select' },
       ...(platform === 'netease' ? [{ key: 'top', title: '听歌排行 Top100', icon: '♜', step: 'top-record' as Step }] : []),
     ]
-    const classifySteps: Step[] = ['select', 'dimensions', 'progress', 'result', 'create']
+    const classifySteps: Step[] = ['ai-setup', 'select', 'dimensions', 'progress', 'result', 'create']
     const isNavigationItemActive = (key: string, itemStep?: Step) => {
       if (settingsOpen) return false
       if (key === 'home') return step === 'login' || step === 'home'
@@ -208,7 +218,12 @@ export function PanelApp() {
           <div className="desktop-brand"><span className="desktop-brand-icon">♫</span><span>TuneNest</span><small>v{CURRENT_VERSION}</small></div>
           <nav className="desktop-nav">
             {navigation.map((item) => (
-              <button key={item.key} className={`desktop-nav-item ${isNavigationItemActive(item.key, item.step) ? 'active' : ''}`} disabled={busy} onClick={() => { setSettingsOpen(false); setStep(state.uid ? item.step! : 'login') }}>
+              <button key={item.key} className={`desktop-nav-item ${isNavigationItemActive(item.key, item.step) ? 'active' : ''}`} disabled={busy} onClick={() => {
+                setSettingsOpen(false)
+                if (!state.uid) setStep('login')
+                else if (item.key === 'classify') { setAISetupTarget('select'); setStep('ai-setup') }
+                else setStep(item.step!)
+              }}>
                 <span>{item.icon}</span>{item.title}
               </button>
             ))}
@@ -223,7 +238,7 @@ export function PanelApp() {
           </div>
         </aside>
         <main className="desktop-main">
-          <header className="desktop-topbar"><div><div className="desktop-eyebrow">TUNENEST MUSIC ORGANIZER</div><h1>{settingsOpen ? '设置' : step === 'login' ? `连接${platform === 'qq' ? 'QQ 音乐' : '网易云音乐'}` : step === 'home' ? '欢迎回来' : step === 'select' ? '选择歌单' : step === 'dimensions' ? '选择分类维度' : step === 'progress' ? '整理歌曲' : step === 'result' ? '分类结果' : step === 'create' ? '创建歌单' : '听歌排行'}</h1></div><div className="desktop-topbar-right"><span className="desktop-version-badge">版本 v{CURRENT_VERSION}</span><div className="desktop-account">{state.uid ? <><span className="desktop-online-dot"/>已登录 · {platform === 'qq' ? 'QQ 音乐' : '网易云'}</> : <><span className="desktop-offline-dot"/>未连接</>}</div></div></header>
+          <header className="desktop-topbar"><div><div className="desktop-eyebrow">TUNENEST MUSIC ORGANIZER</div><h1>{settingsOpen ? '设置' : step === 'login' ? `连接${platform === 'qq' ? 'QQ 音乐' : '网易云音乐'}` : step === 'home' ? '欢迎回来' : step === 'ai-setup' ? '分类准备' : step === 'select' ? '选择歌单' : step === 'dimensions' ? '选择分类维度' : step === 'progress' ? '整理歌曲' : step === 'result' ? '分类结果' : step === 'create' ? '创建歌单' : '听歌排行'}</h1></div><div className="desktop-topbar-right"><span className="desktop-version-badge">版本 v{CURRENT_VERSION}</span><div className="desktop-account">{state.uid ? <><span className="desktop-online-dot"/>已登录 · {platform === 'qq' ? 'QQ 音乐' : '网易云'}</> : <><span className="desktop-offline-dot"/>未连接</>}</div></div></header>
           <section className="desktop-content">
             {latestVersion && <div className="desktop-update">发现新版本 v{latestVersion}　<a href={`https://github.com/${GITHUB_REPO}/releases/latest`} target="_blank" rel="noreferrer">前往更新</a></div>}
             {settingsOpen ? <OptionsApp embedded /> : renderStep()}

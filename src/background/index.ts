@@ -1,5 +1,5 @@
-import type { ExtensionMessage, ExtensionResponse, Settings } from '@/types'
-import { DEFAULT_SETTINGS } from '@/types'
+import type { ExtensionMessage, ExtensionResponse } from '@/types'
+import { loadClassificationSettings } from '@/platform/settings'
 import {
   getLoginStatus,
   getUserPlaylists,
@@ -51,12 +51,13 @@ async function handleMessage(message: ExtensionMessage, sender?: chrome.runtime.
     }
 
     case 'CLASSIFY_SONGS': {
-      const { songs, dimensionSelection } = message.data as {
+      const { songs, dimensionSelection, rulesOnly } = message.data as {
         songs: Parameters<typeof classifySongs>[0]
         dimensionSelection: Parameters<typeof classifySongs>[2]
+        rulesOnly?: boolean
       }
       const tabId = sender?.tab?.id
-      const settings = await getSettings()
+      const settings = await loadClassificationSettings(rulesOnly === true)
       const sendProgress = (p: import('@/classifier').ClassifyProgress) => {
         if (tabId) {
           chrome.tabs.sendMessage(tabId, { action: 'CLASSIFY_PROGRESS', data: p }).catch(() => {})
@@ -71,9 +72,4 @@ async function handleMessage(message: ExtensionMessage, sender?: chrome.runtime.
     default:
       throw new Error(`Unknown action: ${message.action}`)
   }
-}
-
-async function getSettings(): Promise<Settings> {
-  const stored = await chrome.storage.sync.get('settings')
-  return { ...DEFAULT_SETTINGS, ...stored.settings }
 }

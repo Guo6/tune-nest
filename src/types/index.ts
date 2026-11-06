@@ -95,14 +95,21 @@ export interface ExtensionResponse<T = unknown> {
 // ===== 设置 =====
 
 export interface Settings {
-  deepseekApiKey: string
+  aiProvider: AIProvider
+  /** Pending edits only; desktop reads never return stored secrets. */
+  aiKeys: Partial<Record<AIProvider, string>>
+  aiKeyConfigured: Partial<Record<AIProvider, boolean>>
   enableAI: boolean
   batchSize: number
   requestDelay: number
 }
 
+export type AIProvider = 'xbot' | 'deepseek' | 'zhipu'
+
 export const DEFAULT_SETTINGS: Settings = {
-  deepseekApiKey: '',
+  aiProvider: 'xbot',
+  aiKeys: {},
+  aiKeyConfigured: {},
   enableAI: true,
   batchSize: 30,
   requestDelay: 500,

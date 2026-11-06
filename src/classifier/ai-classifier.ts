@@ -1,5 +1,6 @@
-import type { ClassifyResult, DimensionSelection, ClassifyDimension } from '@/types'
-import { requestDeepseek } from '@/platform/settings'
+import type { ClassifyResult, DimensionSelection, ClassifyDimension, Settings } from '@/types'
+import { requestAI } from '@/platform/settings'
+import { readAIContent } from '@/platform/ai'
 
 interface DeepSeekMessage {
   role: 'system' | 'user' | 'assistant'
@@ -97,7 +98,7 @@ ${exOutput}
 
 export async function classifyByAI(
   songs: SongInput[],
-  apiKey: string,
+  settings: Settings,
   dimensionSelection: DimensionSelection,
   existingResults?: Map<number, ClassifyResult>
 ): Promise<Map<number, Partial<AIClassifyOutput>>> {
@@ -134,31 +135,34 @@ export async function classifyByAI(
   const estimatedTokensPerSong = 30 + dimsToClassify.length * 15
   const maxTokens = Math.min(Math.max(songsWithNeededDims.length * estimatedTokensPerSong, 512), 8192)
 
-  const data = await requestDeepseek({
-      model: 'deepseek-chat',
+  const data = await requestAI({
       messages,
       temperature: 0,
       max_tokens: maxTokens,
-  }, apiKey) as { choices?: Array<{ message?: { content?: string } }> }
-  const content = data.choices?.[0]?.message?.content || ''
+  }, settings)
+  const content = readAIContent(data)
 
   const jsonMatch = content.match(/\[[\s\S]*\]/)
   if (!jsonMatch) {
-    throw new Error('DeepSeek 返回格式异常，无法解析 JSON')
+    throw new Error('AI 返回格式异常，无法解析 JSON')
   }
 
   const parsed: AIClassifyOutput[] = JSON.parse(jsonMatch[0])
+  if (!Array.isArray(parsed)) throw new Error('AI 分类结果必须是数组')
+  const requestedIds = new Set(songsWithNeededDims.map(({ song }) => song.id))
   const resultMap = new Map<number, Partial<AIClassifyOutput>>()
 
   for (const item of parsed) {
-    resultMap.set(item.id, {
-      mood: item.mood,
-      language: item.language,
-      region: item.region,
-      era: item.era,
-      genre: item.genre,
-    })
+    if (!item || !requestedIds.has(item.id) || resultMap.has(item.id)) throw new Error('AI 返回了未知或重复的歌曲 ID')
+    const values: Partial<AIClassifyOutput> = {}
+    for (const dim of dimsToClassify) {
+      const value = item[dim]
+      if (value != null && !dimensionSelection[dim]?.includes(value)) throw new Error('AI 返回了不在所选范围内的分类')
+      if (value) values[dim] = value
+    }
+    resultMap.set(item.id, values)
   }
+  if (resultMap.size !== requestedIds.size) throw new Error('AI 分类结果缺少歌曲，请减小每批歌曲数后重试')
 
   return resultMap
 }

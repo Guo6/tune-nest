@@ -9,10 +9,10 @@ QQ 音乐接入仍处于开发验证阶段：扫码后的账号读取和歌单�
 ## 功能
 
 - 基于歌曲标签、歌手名和发行时间进行规则分类
-- 可选 DeepSeek AI 分类
+- 可选 AI 分类：Xbot AI 中转站（默认）、DeepSeek、智谱
 - 批量创建分类歌单；网易云支持同名歌单追加、替换或跳过，QQ 音乐暂支持追加或跳过
 - 两个平台的扫码登录凭据分别保存在系统凭据存储中
-- DeepSeek API Key 保存在 Windows 凭据管理器或 macOS 钥匙串
+- 各 AI 渠道的 API Key 分别保存在 Windows 凭据管理器或 macOS 钥匙串
 
 ## 开发桌面版
 
@@ -47,6 +47,18 @@ npm run extension:build
 
 QQ 音乐使用网页端的非公开接口。开发版提供扫码、歌单读取和写回代码，但真实账号的登录、读回与写入仍需逐项验证；写入后会重新读取目标歌单，未确认生效时不会显示成功。
 
-## DeepSeek 设置
+## AI 渠道设置
 
-在桌面应用左侧打开「设置」，填写 API Key 并测试连通性。AI 分类费用和额度以 DeepSeek 平台显示为准；不设置密钥也可以使用规则分类。
+在桌面应用左侧打开「设置」，选择渠道，填写该渠道的 API Key，保存后点击「测试实际调用」。测试会发起一个小额真实模型请求，只有返回有效内容并通过指令校验才显示成功。AI 分类费用和额度以对应平台显示为准；不设置密钥也可以使用规则分类。
+
+进入「智能歌单分类」会先检查当前渠道是否已配置 Key 并启用 AI。未配置时可选择「去配置 AI 渠道」，保存后接着完成当前流程；也可选择「暂不配置，继续分类」，本次仅使用规则，保留已有 AI 设置。检查本身不调用模型、不消耗额度；开始实际分类前还会复查配置，已明确选择跳过的本次任务不重复提示。
+
+| 渠道 | 内置模型 | 获取 Key |
+| --- | --- | --- |
+| Xbot AI 中转站（首次使用默认） | `gpt-5.6-luna` | [注册 / 登录](https://newadm.xbotai.cc/sign-up)后点击顶部菜单「TuneNest」→「创建 / 获取 API Key」→复制到 TuneNest 设置 |
+| DeepSeek | `deepseek-flash` | [DeepSeek 控制台](https://platform.deepseek.com/api_keys) |
+| 智谱 | `glm-4-flash-250414` | [智谱控制台](https://bigmodel.cn/usercenter/proj-mgmt/apikeys)的标准 API Key，非 Coding Plan 专用 Key |
+
+切换渠道会保留其他渠道的密钥。已有 DeepSeek 配置升级后保留该渠道；已保存密钥不会返回到桌面页面。分类缓存按音乐平台、AI 渠道及所选维度隔离。扩展版密钥只存在浏览器本机 storage.local，不再同步到其他电脑。
+
+New API 菜单源码、部署和升级后的刷新步骤见 [部署说明](docs/NEW_API_ONBOARDING.md)。真实调用验证范围见 [开发交接记录](docs/DEVELOPMENT_HANDOFF.md)。
